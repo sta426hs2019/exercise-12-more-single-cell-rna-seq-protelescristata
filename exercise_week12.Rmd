@@ -1,0 +1,137 @@
+---
+title: "exercise_week12"
+author: "Gian Hiltbrunner"
+date: "12/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 1
+
+* Grab a well-known dataset, the Zheng 10x PBMC pre-sorted dataset, from ExperimentHub (see code below). Explore basic properties of this dataset, including the number cells of each subpopulation (see the phenoid column of the colData), the depth of sequencing by subpopulation and other aspects you can think of. Re-investigate the filtering (some was already) by plotting the percentage of mitochondrial reads versus the total number of reads. If appropriate, additionally filter any outlier cells.
+
+```{r}
+library(SingleCellExperiment)
+library(ExperimentHub)
+library(scater)
+
+eh <- ExperimentHub()
+sce <- eh[["EH1532"]]
+rownames(sce) <- paste0(rowData(sce)$id, "_", rowData(sce)$symbol)
+sce
+
+df <- as.data.frame(table(colData(sce)$phenoid))
+colnames(df) <- c('Phenoid','Count')
+
+library(ggplot2)
+ggplot(df) + 
+  geom_bar(aes(Phenoid, Count), stat="identity")
+```
+
+```{r}
+library(dplyr)
+counts <- colData(sce)$total_counts
+phenoid <- colData(sce)$phenoid
+
+phenoid_counts <- data.frame(Phenoid = phenoid, Counts = counts)
+phenoid_counts <- phenoid_counts %>% 
+  group_by(Phenoid) %>%
+  summarise(Counts = sum(Counts))
+
+ggplot(phenoid_counts) + 
+  geom_bar(aes(Phenoid, Counts), stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+mito <- grep("MT-", rownames(sce), value = TRUE)
+sce_mt <- addPerCellQC(sce, subsets = list(Mt = mito))
+sce_mt <- addPerFeatureQC(sce_mt)
+
+col_data_mt <- colData(sce_mt)
+
+phenoid_counts_mt <- data.frame(Phenoid = phenoid, Counts = col_data_mt$subsets_Mt_sum)
+phenoid_counts_mt <- phenoid_counts_mt %>% 
+  group_by(Phenoid) %>%
+  summarise(Counts = sum(Counts))
+
+data.frame(Phenoid = phenoid_counts_mt$Phenoid, FractionMT = (phenoid_counts_mt$Counts / phenoid_counts$Counts))
+```
+
+## Question 2
+* Identify “features of interest”, which usually means highly variable genes. There are various ways to do this (e.g., Seurat’s FindVariableFeatures or scran’s modelGeneVar). Select features in at least two ways (say, 1000-2000 genes) and make an upset plot to compare the lists.
+
+```{r}
+library(Seurat)
+
+sce.seurat <- as.Seurat(sce)
+pbmc <- FindVariableFeatures(sce.seurat)
+
+# Identify the 10 most highly variable genes
+top_seurat <- head(VariableFeatures(pbmc), 2000)
+
+#Scrah
+library(scran)
+res_scran <- modelGeneVar(sce)
+res_scran <- res_scran[order(res_scran$p.value),]
+top_scran <- rownames(res_scran)[1:2000]
+
+library(UpSetR)
+upset(fromList(list(SCRAN = top_scran, SEURAT = top_seurat)))
+```
+
+## Question 3
+* Re-calculate the low dimensional projection using your preferred set of selected features and produce some visualizations. For example, after re-running PCA, use the scater package to run the UMAP algorithm. Make multiple plots of the UMAP coordinates according to cell type (this is known in advance for this dataset), depth of sequencing and anything else you might find appropriate.
+
+```{r}
+sce <- runPCA(sce)
+sce <- runUMAP(sce)
+
+plotPCA(sce, colour_by = "phenoid")
+```
+
+```{r}
+plotUMAP(sce, colour_by = "phenoid")
+```
+
+```{r}
+plotUMAP(sce, colour_by = "total_counts")
+```
+
+Question 4. Run at least 2 algorithms to cluster the data and make some comparisons. One should be graph-based clustering as this seems to perform well, generally speaking. Calculate the F1 score for each cell type (solve_LSAP in the clue package may be useful for matching of clsuters to true populations) and the adjusted rand index (adjustedRandIndex in the mclust package, for example) for an overall score. What cell types are more difficult to separate with clustering? Run one of the algorithms at different numbers of clusters and plot a curve of the performance (e.g., adjusted rand index) as a function of the number of clusters.
+
+```{r}
+library(clue)
+
+hclust_sce <- quickCluster(sce, method = 'hclust')#Hierarchical
+igraph_sce <- quickCluster(sce, method = 'igraph')
+
+true_label <- as.factor(colData(sce)$phenoid)
+
+dist_mat = dist(rbind(igraph_sce, true_label))
+soln = solve_LSAP(dist_mat)
+data.frame(set1 = set1$id, set2 = set2$id[soln])
+```
+```{r}
+library(mclust)
+
+print(paste('The adjusted rand index using hclust is:', adjustedRandIndex(hclust_sce, true_label)))
+print(paste('The adjusted rand index using igraph is:', adjustedRandIndex(igraph_sce, true_label)))
+```
+
+
+```{r}
+rand_ind <- list()
+for (i in 1:10){
+  rand_ind[i] <- adjustedRandIndex(quickCluster(sce, method = 'igraph', min.size = ((3994)/i)), true_label)
+}
+
+df <- (data.frame(n = seq(1,10), adRand = unlist(rand_ind) ))
+
+ggplot(df) +
+  geom_line(aes(n,adRand))
+```
+
