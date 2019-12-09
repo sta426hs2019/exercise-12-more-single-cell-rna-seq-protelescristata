@@ -111,9 +111,9 @@ igraph_sce <- quickCluster(sce, method = 'igraph')
 
 true_label <- as.factor(colData(sce)$phenoid)
 
-dist_mat = dist(rbind(igraph_sce, true_label))
-soln = solve_LSAP(dist_mat)
-data.frame(set1 = set1$id, set2 = set2$id[soln])
+#dist_mat = dist(rbind(igraph_sce, true_label))
+#soln = solve_LSAP(dist_mat)
+#data.frame(set1 = set1$id, set2 = set2$id[soln])
 ```
 ```{r}
 library(mclust)
